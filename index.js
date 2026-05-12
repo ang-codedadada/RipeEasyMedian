@@ -61,7 +61,7 @@ async function checkYouTube() {
     }
 }
 
-client.once("ready", () => {
+client.once("clientReady", () => {
     console.log(`Bot Aktif! Pantau Pesan ID: ${process.env.MESSAGE_ID}`);
     setInterval(checkYouTube, 180000);
 });
