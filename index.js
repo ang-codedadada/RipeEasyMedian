@@ -6,6 +6,7 @@ app.listen(process.env.PORT || 5000);
 require("dotenv").config();
 const { Client, GatewayIntentBits, Partials } = require("discord.js");
 const Parser = require("rss-parser");
+const fs = require("fs");
 
 const parser = new Parser();
 const client = new Client({
@@ -18,7 +19,22 @@ const client = new Client({
     partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
 
-let lastVideoId = "";
+const LAST_VIDEO_FILE = "./last_video_id.txt";
+
+function getLastVideoId() {
+    try {
+        if (fs.existsSync(LAST_VIDEO_FILE)) {
+            return fs.readFileSync(LAST_VIDEO_FILE, "utf8").trim();
+        }
+    } catch (e) {}
+    return "";
+}
+
+function saveLastVideoId(id) {
+    try {
+        fs.writeFileSync(LAST_VIDEO_FILE, id, "utf8");
+    } catch (e) {}
+}
 
 // --- LOGIKA NOTIFIKASI YOUTUBE ---
 async function checkYouTube() {
@@ -33,12 +49,14 @@ async function checkYouTube() {
             latestVideo.link.includes("live") ||
             latestVideo.title.toLowerCase().includes("live");
 
+        const lastVideoId = getLastVideoId();
+
         if (lastVideoId !== latestVideo.id) {
             if (lastVideoId === "") {
-                lastVideoId = latestVideo.id;
+                saveLastVideoId(latestVideo.id);
                 return;
             }
-            lastVideoId = latestVideo.id;
+            saveLastVideoId(latestVideo.id);
 
             const channel = client.channels.cache.get(
                 process.env.DISCORD_CHANNEL_ID,
@@ -67,19 +85,16 @@ client.once("clientReady", () => {
 });
 
 client.on("messageCreate", async (message) => {
-    // Ganti 'TEST_BOT' dengan kata apa saja yang kamu mau untuk ngetes
-    // Bot hanya akan merespon jika KAMU yang mengetik (cek ID kamu agar tidak sembarang orang bisa)
     if (message.content === "!testnotif") {
         const channel = client.channels.cache.get(
             process.env.DISCORD_CHANNEL_ID,
         );
 
         if (channel) {
-            // Kita coba simulasikan sebagai Video Baru
             const roleToPing = process.env.ROLE_VIDEO_ID;
             const messageType =
                 "🎬 Ayah lagi up video yang keren, mampir yuk, jangan lupa Like nya juga yaa.";
-            const fakeLink = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"; // Link contoh
+            const fakeLink = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
 
             await channel.send({
                 content: `Halo Neva disini\n${messageType}\n<@&${roleToPing}>!\n${fakeLink}`,
@@ -97,7 +112,7 @@ client.on("messageCreate", async (message) => {
 // Saat orang kasih emot
 client.on("messageReactionAdd", async (reaction, user) => {
     if (user.bot) return;
-    if (reaction.message.id !== process.env.MESSAGE_ID) return; // Hanya respon di pesan tertentu
+    if (reaction.message.id !== process.env.MESSAGE_ID) return;
 
     if (reaction.partial) await reaction.fetch();
 
