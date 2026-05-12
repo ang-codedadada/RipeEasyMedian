@@ -117,6 +117,17 @@ client.on("messageCreate", async (message) => {
             message.reply("❌ Channel tidak ditemukan. Cek ID Channel di .env!");
         }
     }
+
+    if (message.content === "!hapuskk") {
+        try {
+            const messages = await message.channel.messages.fetch({ limit: 100 });
+            const botMessages = messages.filter((msg) => msg.author.bot);
+            await message.channel.bulkDelete(botMessages, true);
+            await message.delete().catch(() => {});
+        } catch (e) {
+            console.error("Hapus Error:", e);
+        }
+    }
 });
 
 // --- LOGIKA REAKSI EMOT UNTUK ROLE ---
