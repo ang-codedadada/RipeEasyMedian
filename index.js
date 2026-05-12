@@ -1,0 +1,105 @@
+const express = require('express');
+const app = express();
+app.get('/', (req, res) => res.send('Bot Neva Aktif!'));
+app.listen(3000);
+
+require('dotenv').config();
+const { Client, GatewayIntentBits, Partials } = require('discord.js');
+const Parser = require('rss-parser');
+
+const parser = new Parser();
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.GuildMessageReactions,
+        GatewayIntentBits.MessageContent,
+    ],
+    partials: [Partials.Message, Partials.Channel, Partials.Reaction],
+});
+
+let lastVideoId = '';
+
+// --- LOGIKA NOTIFIKASI YOUTUBE ---
+async function checkYouTube() {
+    try {
+        const feed = await parser.parseURL(`https://www.youtube.com/feeds/videos.xml?channel_id=${process.env.YOUTUBE_CHANNEL_ID}`);
+        if (!feed.items.length) return;
+
+        const latestVideo = feed.items[0];
+        const isLive = latestVideo.link.includes('live') || latestVideo.title.toLowerCase().includes('live');
+
+        if (lastVideoId !== latestVideo.id) {
+            if (lastVideoId === '') { lastVideoId = latestVideo.id; return; }
+            lastVideoId = latestVideo.id;
+
+            const channel = client.channels.cache.get(process.env.DISCORD_CHANNEL_ID);
+if (channel) {
+    const roleToPing = isLive ? process.env.ROLE_LIVE_ID : process.env.ROLE_VIDEO_ID;
+    const messageType = isLive 
+        ? '🔴 Ayah lagi live nih, mampir yuk.' 
+        : '🎬 Ayah lagi up video yang keren, mampir yuk, jangan lupa Like nya juga yaa.';
+
+    await channel.send({ 
+        content: `Halo Neva disini\n${messageType}\n<@&${roleToPing}>!\n${latestVideo.link}` 
+    });
+}
+        }
+    } catch (e) { console.error('YouTube Error:', e); }
+}
+
+client.once('ready', () => {
+    console.log(`Bot Aktif! Pantau Pesan ID: ${process.env.MESSAGE_ID}`);
+    setInterval(checkYouTube, 180000);
+});
+
+client.on('messageCreate', async (message) => {
+    // Ganti 'TEST_BOT' dengan kata apa saja yang kamu mau untuk ngetes
+    // Bot hanya akan merespon jika KAMU yang mengetik (cek ID kamu agar tidak sembarang orang bisa)
+    if (message.content === '!testnotif') {
+        const channel = client.channels.cache.get(process.env.DISCORD_CHANNEL_ID);
+
+        if (channel) {
+            // Kita coba simulasikan sebagai Video Baru
+            const roleToPing = process.env.ROLE_VIDEO_ID;
+            const messageType = '🎬 Ayah lagi up video yang keren, mampir yuk, jangan lupa Like nya juga yaa.';
+            const fakeLink = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'; // Link contoh
+
+            await channel.send({ 
+                content: `Halo Neva disini\n${messageType}\n<@&${roleToPing}>!\n${fakeLink}` 
+            });
+
+            message.reply('✅ Test notifikasi berhasil dikirim!');
+        } else {
+            message.reply('❌ Channel tidak ditemukan. Cek ID Channel di .env!');
+        }
+    }
+});
+
+// --- LOGIKA REAKSI EMOT UNTUK ROLE ---
+
+// Saat orang kasih emot
+client.on('messageReactionAdd', async (reaction, user) => {
+    if (user.bot) return;
+    if (reaction.message.id !== process.env.MESSAGE_ID) return; // Hanya respon di pesan tertentu
+
+    if (reaction.partial) await reaction.fetch();
+
+    const member = reaction.message.guild.members.cache.get(user.id);
+    if (reaction.emoji.name === '🎬') await member.roles.add(process.env.ROLE_VIDEO_ID);
+    if (reaction.emoji.name === '🔴') await member.roles.add(process.env.ROLE_LIVE_ID);
+});
+
+// Saat orang hapus emot
+client.on('messageReactionRemove', async (reaction, user) => {
+    if (user.bot) return;
+    if (reaction.message.id !== process.env.MESSAGE_ID) return;
+
+    if (reaction.partial) await reaction.fetch();
+
+    const member = reaction.message.guild.members.cache.get(user.id);
+    if (reaction.emoji.name === '🎬') await member.roles.remove(process.env.ROLE_VIDEO_ID);
+    if (reaction.emoji.name === '🔴') await member.roles.remove(process.env.ROLE_LIVE_ID);
+});
+
+client.login(process.env.BOT_TOKEN);
