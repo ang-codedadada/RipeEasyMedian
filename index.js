@@ -112,7 +112,7 @@ client.on("messageCreate", async (message) => {
             const fakeLink = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
             const content = `Halo Neva disini\n${messageType}\n<@&${roleToPing}>!\n${fakeLink}`;
 
-            await kirimPesan(channel, content, fakeLink);
+            await channel.send({ content });
         } else {
             message.reply("❌ Channel tidak ditemukan. Cek ID Channel di .env!");
         }
