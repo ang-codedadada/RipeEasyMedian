@@ -36,15 +36,24 @@ function saveLastVideoId(id) {
     } catch (e) {}
 }
 
-async function alreadySentNotif(channel, videoLink) {
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function alreadySentNotif(channel, link) {
     try {
         const messages = await channel.messages.fetch({ limit: 20 });
-        return messages.some((msg) =>
-            msg.author.bot && msg.content.includes(videoLink)
-        );
+        return messages.some((msg) => msg.author.bot && msg.content.includes(link));
     } catch (e) {
         return false;
     }
+}
+
+async function kirimPesan(channel, content, link) {
+    const delay = Math.floor(Math.random() * 6000) + 1000;
+    await sleep(delay);
+    if (await alreadySentNotif(channel, link)) return;
+    await channel.send({ content });
 }
 
 // --- LOGIKA NOTIFIKASI YOUTUBE ---
@@ -68,26 +77,17 @@ async function checkYouTube() {
                 return;
             }
 
-            const channel = client.channels.cache.get(
-                process.env.DISCORD_CHANNEL_ID,
-            );
+            const channel = client.channels.cache.get(process.env.DISCORD_CHANNEL_ID);
             if (channel) {
-                const sudahDikirim = await alreadySentNotif(channel, latestVideo.link);
-                if (sudahDikirim) {
-                    saveLastVideoId(latestVideo.id);
-                    return;
-                }
-
                 const roleToPing = isLive
                     ? process.env.ROLE_LIVE_ID
                     : process.env.ROLE_VIDEO_ID;
                 const messageType = isLive
                     ? "🔴 Ayah lagi live nih, mampir yuk."
                     : "🎬 Ayah lagi up video yang keren, mampir yuk, jangan lupa Like nya juga yaa.";
+                const content = `Halo Neva disini\n${messageType}\n<@&${roleToPing}>!\n${latestVideo.link}`;
 
-                await channel.send({
-                    content: `Halo Neva disini\n${messageType}\n<@&${roleToPing}>!\n${latestVideo.link}`,
-                });
+                await kirimPesan(channel, content, latestVideo.link);
                 saveLastVideoId(latestVideo.id);
             }
         }
@@ -103,19 +103,16 @@ client.once("clientReady", () => {
 
 client.on("messageCreate", async (message) => {
     if (message.content === "!testnotif") {
-        const channel = client.channels.cache.get(
-            process.env.DISCORD_CHANNEL_ID,
-        );
+        const channel = client.channels.cache.get(process.env.DISCORD_CHANNEL_ID);
 
         if (channel) {
             const roleToPing = process.env.ROLE_VIDEO_ID;
             const messageType =
                 "🎬 Ayah lagi up video yang keren, mampir yuk, jangan lupa Like nya juga yaa.";
             const fakeLink = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+            const content = `Halo Neva disini\n${messageType}\n<@&${roleToPing}>!\n${fakeLink}`;
 
-            await channel.send({
-                content: `Halo Neva disini\n${messageType}\n<@&${roleToPing}>!\n${fakeLink}`,
-            });
+            await kirimPesan(channel, content, fakeLink);
         } else {
             message.reply("❌ Channel tidak ditemukan. Cek ID Channel di .env!");
         }
