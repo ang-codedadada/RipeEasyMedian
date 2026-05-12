@@ -36,6 +36,17 @@ function saveLastVideoId(id) {
     } catch (e) {}
 }
 
+async function alreadySentNotif(channel, videoLink) {
+    try {
+        const messages = await channel.messages.fetch({ limit: 20 });
+        return messages.some((msg) =>
+            msg.author.bot && msg.content.includes(videoLink)
+        );
+    } catch (e) {
+        return false;
+    }
+}
+
 // --- LOGIKA NOTIFIKASI YOUTUBE ---
 async function checkYouTube() {
     try {
@@ -56,12 +67,17 @@ async function checkYouTube() {
                 saveLastVideoId(latestVideo.id);
                 return;
             }
-            saveLastVideoId(latestVideo.id);
 
             const channel = client.channels.cache.get(
                 process.env.DISCORD_CHANNEL_ID,
             );
             if (channel) {
+                const sudahDikirim = await alreadySentNotif(channel, latestVideo.link);
+                if (sudahDikirim) {
+                    saveLastVideoId(latestVideo.id);
+                    return;
+                }
+
                 const roleToPing = isLive
                     ? process.env.ROLE_LIVE_ID
                     : process.env.ROLE_VIDEO_ID;
@@ -72,6 +88,7 @@ async function checkYouTube() {
                 await channel.send({
                     content: `Halo Neva disini\n${messageType}\n<@&${roleToPing}>!\n${latestVideo.link}`,
                 });
+                saveLastVideoId(latestVideo.id);
             }
         }
     } catch (e) {
@@ -100,16 +117,13 @@ client.on("messageCreate", async (message) => {
                 content: `Halo Neva disini\n${messageType}\n<@&${roleToPing}>!\n${fakeLink}`,
             });
         } else {
-            message.reply(
-                "❌ Channel tidak ditemukan. Cek ID Channel di .env!",
-            );
+            message.reply("❌ Channel tidak ditemukan. Cek ID Channel di .env!");
         }
     }
 });
 
 // --- LOGIKA REAKSI EMOT UNTUK ROLE ---
 
-// Saat orang kasih emot
 client.on("messageReactionAdd", async (reaction, user) => {
     if (user.bot) return;
     if (reaction.message.id !== process.env.MESSAGE_ID) return;
@@ -123,7 +137,6 @@ client.on("messageReactionAdd", async (reaction, user) => {
         await member.roles.add(process.env.ROLE_LIVE_ID);
 });
 
-// Saat orang hapus emot
 client.on("messageReactionRemove", async (reaction, user) => {
     if (user.bot) return;
     if (reaction.message.id !== process.env.MESSAGE_ID) return;
