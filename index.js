@@ -113,6 +113,7 @@ client.on("messageCreate", async (message) => {
             const content = `Halo Neva disini\n${messageType}\n<@&${roleToPing}>!\n${fakeLink}`;
 
             await channel.send({ content });
+            message.reply("✅ Test notifikasi berhasil dikirim!");
         } else {
             message.reply("❌ Channel tidak ditemukan. Cek ID Channel di .env!");
         }
