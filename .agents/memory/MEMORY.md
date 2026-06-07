@@ -1,0 +1,1 @@
+- [Ide Fitur Bot Neva](ide-fitur-bot.md) — ide multi-server support dan AI chat Gemini yang belum diimplementasi, simpan untuk nanti
