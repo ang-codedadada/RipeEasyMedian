@@ -7,6 +7,7 @@ require("dotenv").config();
 const { Client, GatewayIntentBits, Partials } = require("discord.js");
 const Parser = require("rss-parser");
 const fs = require("fs");
+const https = require("https");
 
 const parser = new Parser();
 const client = new Client({
@@ -36,10 +37,6 @@ function saveLastVideoId(id) {
     } catch (e) {}
 }
 
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function alreadySentNotif(channel, link) {
     try {
         const messages = await channel.messages.fetch({ limit: 20 });
@@ -49,11 +46,23 @@ async function alreadySentNotif(channel, link) {
     }
 }
 
-async function kirimPesan(channel, content, link) {
-    const delay = Math.floor(Math.random() * 6000) + 1000;
-    await sleep(delay);
-    if (await alreadySentNotif(channel, link)) return;
-    await channel.send({ content });
+function fetchPage(url) {
+    return new Promise((resolve) => {
+        https.get(url, { headers: { "User-Agent": "Mozilla/5.0" } }, (res) => {
+            let data = "";
+            res.on("data", (chunk) => { data += chunk; });
+            res.on("end", () => resolve(data));
+        }).on("error", () => resolve(""));
+    });
+}
+
+async function isVideoLive(videoLink) {
+    try {
+        const page = await fetchPage(videoLink);
+        return page.includes('"isLiveBroadcast":true') || page.includes('"isLiveContent":true');
+    } catch (e) {
+        return false;
+    }
 }
 
 // --- LOGIKA NOTIFIKASI YOUTUBE ---
@@ -65,10 +74,6 @@ async function checkYouTube() {
         if (!feed.items.length) return;
 
         const latestVideo = feed.items[0];
-        const isLive =
-            latestVideo.link.includes("live") ||
-            latestVideo.title.toLowerCase().includes("live");
-
         const lastVideoId = getLastVideoId();
 
         if (lastVideoId !== latestVideo.id) {
@@ -77,17 +82,25 @@ async function checkYouTube() {
                 return;
             }
 
+            const isLive = await isVideoLive(latestVideo.link);
+
             const channel = client.channels.cache.get(process.env.DISCORD_CHANNEL_ID);
             if (channel) {
+                if (await alreadySentNotif(channel, latestVideo.link)) {
+                    saveLastVideoId(latestVideo.id);
+                    return;
+                }
+
                 const roleToPing = isLive
                     ? process.env.ROLE_LIVE_ID
                     : process.env.ROLE_VIDEO_ID;
                 const messageType = isLive
                     ? "🔴 Ayah lagi live nih, mampir yuk."
                     : "🎬 Ayah lagi up video yang keren, mampir yuk, jangan lupa Like nya juga yaa.";
-                const content = `Halo Neva disini\n${messageType}\n<@&${roleToPing}>!\n${latestVideo.link}`;
 
-                await kirimPesan(channel, content, latestVideo.link);
+                await channel.send({
+                    content: `Halo Neva disini\n${messageType}\n<@&${roleToPing}>!\n${latestVideo.link}`,
+                });
                 saveLastVideoId(latestVideo.id);
             }
         }
@@ -98,7 +111,7 @@ async function checkYouTube() {
 
 client.once("clientReady", () => {
     console.log(`Bot Aktif! Pantau Pesan ID: ${process.env.MESSAGE_ID}`);
-    setInterval(checkYouTube, 180000);
+    setInterval(checkYouTube, 60000);
 });
 
 client.on("messageCreate", async (message) => {
@@ -114,6 +127,22 @@ client.on("messageCreate", async (message) => {
 
             await channel.send({ content });
             message.reply("✅ Test notifikasi berhasil dikirim!");
+        } else {
+            message.reply("❌ Channel tidak ditemukan. Cek ID Channel di .env!");
+        }
+    }
+
+    if (message.content === "!testlive") {
+        const channel = client.channels.cache.get(process.env.DISCORD_CHANNEL_ID);
+
+        if (channel) {
+            const roleToPing = process.env.ROLE_LIVE_ID;
+            const messageType = "🔴 Ayah lagi live nih, mampir yuk.";
+            const fakeLink = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+            const content = `Halo Neva disini\n${messageType}\n<@&${roleToPing}>!\n${fakeLink}`;
+
+            await channel.send({ content });
+            message.reply("✅ Test live berhasil dikirim!");
         } else {
             message.reply("❌ Channel tidak ditemukan. Cek ID Channel di .env!");
         }
