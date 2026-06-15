@@ -63,35 +63,45 @@ async function alreadySentNotif(channel, link) {
     }
 }
 
-// --- CEK LIVE (langsung dari halaman channel/live) ---
+// --- CEK LIVE (cek tiap video RSS terbaru apakah sedang live) ---
 async function checkLive() {
     try {
-        const page = await fetchPage(`https://www.youtube.com/channel/${process.env.YOUTUBE_CHANNEL_ID}/live`);
+        const feed = await parser.parseURL(
+            `https://www.youtube.com/feeds/videos.xml?channel_id=${process.env.YOUTUBE_CHANNEL_ID}`,
+        );
+        if (!feed.items.length) return;
 
-        const isLive = page.includes('"isLiveNow":true') ||
-                       page.includes('"liveBroadcastDetails":{"isLiveNow":true');
+        const lastLiveId = getFile(LAST_LIVE_FILE);
 
-        if (!isLive) return;
+        for (const item of feed.items.slice(0, 3)) {
+            // Ambil video ID dari link
+            const vidMatch = item.link && item.link.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+            const videoId = vidMatch ? vidMatch[1] : null;
+            if (!videoId) continue;
+            if (videoId === lastLiveId) continue;
 
-        const match = page.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
-        if (!match) return;
+            // Cek halaman video apakah sekarang sedang live
+            const page = await fetchPage(`https://www.youtube.com/watch?v=${videoId}`);
+            const isLiveNow = page.includes('"isLiveNow":true') ||
+                              page.includes('"isLiveNow": true');
 
-        const liveVideoId = match[1];
-        if (liveVideoId === getFile(LAST_LIVE_FILE)) return;
+            if (!isLiveNow) continue;
 
-        const liveLink = `https://www.youtube.com/watch?v=${liveVideoId}`;
-        const channel = client.channels.cache.get(process.env.DISCORD_CHANNEL_ID);
+            const liveLink = `https://www.youtube.com/watch?v=${videoId}`;
+            const channel = client.channels.cache.get(process.env.DISCORD_CHANNEL_ID);
 
-        if (channel) {
-            if (await alreadySentNotif(channel, liveLink)) {
-                saveFile(LAST_LIVE_FILE, liveVideoId);
-                return;
+            if (channel) {
+                if (await alreadySentNotif(channel, liveLink)) {
+                    saveFile(LAST_LIVE_FILE, videoId);
+                    return;
+                }
+
+                await channel.send({
+                    content: `Halo Neva disini\n🔴 Ayah lagi live nih, mampir yuk.\n<@&${process.env.ROLE_LIVE_ID}>!\n${liveLink}`,
+                });
+                saveFile(LAST_LIVE_FILE, videoId);
             }
-
-            await channel.send({
-                content: `Halo Neva disini\n🔴 Ayah lagi live nih, mampir yuk.\n<@&${process.env.ROLE_LIVE_ID}>!\n${liveLink}`,
-            });
-            saveFile(LAST_LIVE_FILE, liveVideoId);
+            return;
         }
     } catch (e) {
         console.error("Live Check Error:", e);
