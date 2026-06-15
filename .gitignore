@@ -1,0 +1,4 @@
+node_modules/
+.env
+last_video_id.txt
+last_live_id.txt
