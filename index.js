@@ -5,11 +5,9 @@ app.listen(process.env.PORT || 5000);
 
 require("dotenv").config();
 const { Client, GatewayIntentBits, Partials } = require("discord.js");
-const Parser = require("rss-parser");
 const fs = require("fs");
 const https = require("https");
 
-const parser = new Parser();
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -23,128 +21,121 @@ const client = new Client({
 const LAST_VIDEO_FILE = "./last_video_id.txt";
 const LAST_LIVE_FILE  = "./last_live_id.txt";
 
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
 function getFile(path) {
-    try {
-        if (fs.existsSync(path)) return fs.readFileSync(path, "utf8").trim();
-    } catch (e) {}
+    try { if (fs.existsSync(path)) return fs.readFileSync(path, "utf8").trim(); } catch (e) {}
     return "";
 }
-
 function saveFile(path, value) {
     try { fs.writeFileSync(path, value, "utf8"); } catch (e) {}
 }
 
-function fetchPage(url, redirects = 4) {
+function fetchPage(url, redirects = 5) {
     return new Promise((resolve) => {
-        const req = https.get(url, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36" } }, (res) => {
-            const location = res.headers.location;
-            if ([301, 302, 303].includes(res.statusCode) && location && redirects > 0) {
-                const next = location.startsWith("http") ? location : `https://www.youtube.com${location}`;
-                resolve(fetchPage(next, redirects - 1));
+        const req = https.get(url, { headers: { "User-Agent": UA } }, (res) => {
+            const loc = res.headers.location;
+            if ([301, 302, 303].includes(res.statusCode) && loc && redirects > 0) {
+                resolve(fetchPage(loc.startsWith("http") ? loc : `https://www.youtube.com${loc}`, redirects - 1));
                 return;
             }
             let data = "";
-            res.on("data", (chunk) => {
-                data += chunk;
-                if (data.length > 600000) req.destroy();
-            });
+            res.on("data", (chunk) => { data += chunk; if (data.length > 700000) req.destroy(); });
             res.on("end", () => resolve(data));
         });
         req.on("error", () => resolve(""));
     });
 }
 
+// Ambil video ID terbaru dari halaman channel (bukan RSS)
+async function getLatestVideoIds() {
+    const page = await fetchPage(`https://www.youtube.com/channel/${process.env.YOUTUBE_CHANNEL_ID}/videos`);
+    const matches = [...page.matchAll(/"videoId":"([a-zA-Z0-9_-]{11})"/g)];
+    return [...new Set(matches.map(m => m[1]))].slice(0, 5);
+}
+
 async function alreadySentNotif(channel, link) {
     try {
         const messages = await channel.messages.fetch({ limit: 20 });
         return messages.some((msg) => msg.author.bot && msg.content.includes(link));
-    } catch (e) {
-        return false;
-    }
+    } catch (e) { return false; }
 }
 
-// --- CEK LIVE (cek tiap video RSS terbaru apakah sedang live) ---
+// --- CEK LIVE ---
 async function checkLive() {
     try {
-        const feed = await parser.parseURL(
-            `https://www.youtube.com/feeds/videos.xml?channel_id=${process.env.YOUTUBE_CHANNEL_ID}`,
-        );
-        if (!feed.items.length) return;
+        const channelId = process.env.YOUTUBE_CHANNEL_ID;
 
-        const lastLiveId = getFile(LAST_LIVE_FILE);
+        // Cek halaman /live channel langsung
+        const livePage = await fetchPage(`https://www.youtube.com/channel/${channelId}/live`);
 
-        for (const item of feed.items.slice(0, 3)) {
-            // Ambil video ID dari link
-            const vidMatch = item.link && item.link.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
-            const videoId = vidMatch ? vidMatch[1] : null;
-            if (!videoId) continue;
-            if (videoId === lastLiveId) continue;
+        // Cari video ID di halaman /live
+        const vidMatch = livePage.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
+        if (!vidMatch) return;
+        const videoId = vidMatch[1];
 
-            // Cek halaman video apakah sekarang sedang live
-            const page = await fetchPage(`https://www.youtube.com/watch?v=${videoId}`);
-            const isLiveNow = page.includes('"isLiveNow":true') ||
-                              page.includes('"isLiveNow": true');
+        // Pastikan ini benar-benar sedang live (bukan scheduled)
+        const isLiveNow =
+            livePage.includes('"isLiveNow":true') ||
+            livePage.includes('"isLive":true') ||
+            (livePage.includes('"hlsManifestUrl"') && livePage.includes('"isLiveBroadcast":true'));
 
-            if (!isLiveNow) continue;
+        console.log(`[Live] videoId=${videoId} isLiveNow=${isLiveNow} pageLen=${livePage.length}`);
 
-            const liveLink = `https://www.youtube.com/watch?v=${videoId}`;
-            const channel = client.channels.cache.get(process.env.DISCORD_CHANNEL_ID);
+        if (!isLiveNow) return;
+        if (videoId === getFile(LAST_LIVE_FILE)) return;
 
-            if (channel) {
-                if (await alreadySentNotif(channel, liveLink)) {
-                    saveFile(LAST_LIVE_FILE, videoId);
-                    return;
-                }
+        const liveLink = `https://www.youtube.com/watch?v=${videoId}`;
+        const channel = client.channels.cache.get(process.env.DISCORD_CHANNEL_ID);
+        if (!channel) return;
+        if (await alreadySentNotif(channel, liveLink)) { saveFile(LAST_LIVE_FILE, videoId); return; }
 
-                await channel.send({
-                    content: `Halo Neva disini\n🔴 Ayah lagi live nih, mampir yuk.\n<@&${process.env.ROLE_LIVE_ID}>!\n${liveLink}`,
-                });
-                saveFile(LAST_LIVE_FILE, videoId);
-            }
-            return;
-        }
+        await channel.send({
+            content: `Halo Neva disini\n🔴 Ayah lagi live nih, mampir yuk.\n<@&${process.env.ROLE_LIVE_ID}>!\n${liveLink}`,
+        });
+        saveFile(LAST_LIVE_FILE, videoId);
+        console.log(`[Live] Notif live terkirim: ${liveLink}`);
     } catch (e) {
-        console.error("Live Check Error:", e);
+        console.error("Live Check Error:", e.message);
     }
 }
 
-// --- CEK VIDEO BARU (RSS, skip jika live/replay) ---
+// --- CEK VIDEO BARU ---
 async function checkYouTube() {
     try {
-        const feed = await parser.parseURL(
-            `https://www.youtube.com/feeds/videos.xml?channel_id=${process.env.YOUTUBE_CHANNEL_ID}`,
-        );
-        if (!feed.items.length) return;
+        const videoIds = await getLatestVideoIds();
+        if (!videoIds.length) { console.log("[YT] Tidak ada video ditemukan di channel page"); return; }
 
-        const latestVideo = feed.items[0];
+        const latestId = videoIds[0];
         const lastVideoId = getFile(LAST_VIDEO_FILE);
 
-        if (lastVideoId === latestVideo.id) return;
+        console.log(`[YT] Latest=${latestId} Last=${lastVideoId}`);
+
+        if (latestId === lastVideoId) return;
 
         if (lastVideoId === "") {
-            saveFile(LAST_VIDEO_FILE, latestVideo.id);
+            saveFile(LAST_VIDEO_FILE, latestId);
             return;
         }
 
-        // Cek apakah ini live/replay — kalau iya, skip (sudah ditangani checkLive)
-        const page = await fetchPage(latestVideo.link);
-        const isLiveContent = page.includes('"isLiveContent":true') ||
-                              page.includes('"isLiveBroadcast":true');
+        // Cek halaman video — skip kalau live/replay
+        const page = await fetchPage(`https://www.youtube.com/watch?v=${latestId}`);
+        const isLiveContent = page.includes('"isLiveContent":true') || page.includes('"isLiveBroadcast":true');
+        saveFile(LAST_VIDEO_FILE, latestId);
 
-        saveFile(LAST_VIDEO_FILE, latestVideo.id);
+        if (isLiveContent) { console.log("[YT] Skip — live/replay content"); return; }
 
-        if (isLiveContent) return;
-
+        const videoLink = `https://www.youtube.com/watch?v=${latestId}`;
         const channel = client.channels.cache.get(process.env.DISCORD_CHANNEL_ID);
-        if (channel) {
-            if (await alreadySentNotif(channel, latestVideo.link)) return;
+        if (!channel) return;
+        if (await alreadySentNotif(channel, videoLink)) return;
 
-            await channel.send({
-                content: `Halo Neva disini\n🎬 Ayah lagi up video yang keren, mampir yuk, jangan lupa Like nya juga yaa.\n<@&${process.env.ROLE_VIDEO_ID}>!\n${latestVideo.link}`,
-            });
-        }
+        await channel.send({
+            content: `Halo Neva disini\n🎬 Ayah lagi up video yang keren, mampir yuk, jangan lupa Like nya juga yaa.\n<@&${process.env.ROLE_VIDEO_ID}>!\n${videoLink}`,
+        });
+        console.log(`[YT] Notif video terkirim: ${videoLink}`);
     } catch (e) {
-        console.error("YouTube Error:", e);
+        console.error("YouTube Error:", e.message);
     }
 }
 
@@ -163,7 +154,7 @@ client.on("messageCreate", async (message) => {
             });
             message.reply("✅ Test notifikasi video berhasil dikirim!");
         } else {
-            message.reply("❌ Channel tidak ditemukan. Cek ID Channel di .env!");
+            message.reply("❌ Channel tidak ditemukan.");
         }
     }
 
@@ -175,7 +166,7 @@ client.on("messageCreate", async (message) => {
             });
             message.reply("✅ Test notifikasi live berhasil dikirim!");
         } else {
-            message.reply("❌ Channel tidak ditemukan. Cek ID Channel di .env!");
+            message.reply("❌ Channel tidak ditemukan.");
         }
     }
 
@@ -185,19 +176,15 @@ client.on("messageCreate", async (message) => {
             const botMessages = messages.filter((msg) => msg.author.bot);
             await message.channel.bulkDelete(botMessages, true);
             await message.delete().catch(() => {});
-        } catch (e) {
-            console.error("Hapus Error:", e);
-        }
+        } catch (e) { console.error("Hapus Error:", e.message); }
     }
 });
 
-// --- LOGIKA REAKSI EMOT UNTUK ROLE ---
-
+// --- REAKSI EMOT UNTUK ROLE ---
 client.on("messageReactionAdd", async (reaction, user) => {
     if (user.bot) return;
     if (reaction.message.id !== process.env.MESSAGE_ID) return;
     if (reaction.partial) await reaction.fetch();
-
     const member = reaction.message.guild.members.cache.get(user.id);
     if (reaction.emoji.name === "🎬") await member.roles.add(process.env.ROLE_VIDEO_ID);
     if (reaction.emoji.name === "🔴") await member.roles.add(process.env.ROLE_LIVE_ID);
@@ -207,7 +194,6 @@ client.on("messageReactionRemove", async (reaction, user) => {
     if (user.bot) return;
     if (reaction.message.id !== process.env.MESSAGE_ID) return;
     if (reaction.partial) await reaction.fetch();
-
     const member = reaction.message.guild.members.cache.get(user.id);
     if (reaction.emoji.name === "🎬") await member.roles.remove(process.env.ROLE_VIDEO_ID);
     if (reaction.emoji.name === "🔴") await member.roles.remove(process.env.ROLE_LIVE_ID);
