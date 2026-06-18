@@ -61,29 +61,63 @@ async function alreadySentNotif(channel, link) {
     } catch (e) { return false; }
 }
 
+// Cari video live dari halaman tertentu
+function findLiveVideoId(page) {
+    // Metode 1: badge LIVE_NOW di sebelah video ID
+    const badgeIdx = page.indexOf('"BADGE_STYLE_TYPE_LIVE_NOW"');
+    if (badgeIdx !== -1) {
+        const nearby = page.substring(Math.max(0, badgeIdx - 300), badgeIdx + 300);
+        const m = nearby.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
+        if (m) return { videoId: m[1], method: "badge" };
+    }
+
+    // Metode 2: isLiveNow/isLive ada di page lalu ambil videoId terdekat
+    const liveIdx = page.search(/"isLiveNow"\s*:\s*true|"isLive"\s*:\s*true/);
+    if (liveIdx !== -1) {
+        const nearby = page.substring(Math.max(0, liveIdx - 500), liveIdx + 500);
+        const m = nearby.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
+        if (m) return { videoId: m[1], method: "isLive" };
+    }
+
+    // Metode 3: ada hlsManifestUrl (pasti sedang live)
+    if (page.includes('"hlsManifestUrl"')) {
+        const m = page.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
+        if (m) return { videoId: m[1], method: "hls" };
+    }
+
+    return null;
+}
+
 // --- CEK LIVE ---
 async function checkLive() {
     try {
         const channelId = process.env.YOUTUBE_CHANNEL_ID;
 
-        // Cek halaman /live channel langsung
-        const livePage = await fetchPage(`https://www.youtube.com/channel/${channelId}/live`);
+        // Cek halaman channel utama dulu (lebih reliable saat live)
+        const channelPage = await fetchPage(`https://www.youtube.com/channel/${channelId}`);
+        console.log(`[Live] channel page len=${channelPage.length}`);
 
-        // Cari video ID di halaman /live
-        const vidMatch = livePage.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
-        if (!vidMatch) return;
-        const videoId = vidMatch[1];
+        let result = findLiveVideoId(channelPage);
 
-        // Pastikan ini benar-benar sedang live (bukan scheduled)
-        const isLiveNow =
-            livePage.includes('"isLiveNow":true') ||
-            livePage.includes('"isLive":true') ||
-            (livePage.includes('"hlsManifestUrl"') && livePage.includes('"isLiveBroadcast":true'));
+        // Jika tidak ketemu di channel page, coba /live
+        if (!result) {
+            const livePage = await fetchPage(`https://www.youtube.com/channel/${channelId}/live`);
+            console.log(`[Live] /live page len=${livePage.length}`);
+            result = findLiveVideoId(livePage);
+        }
 
-        console.log(`[Live] videoId=${videoId} isLiveNow=${isLiveNow} pageLen=${livePage.length}`);
+        if (!result) {
+            console.log("[Live] Tidak ada live terdeteksi");
+            return;
+        }
 
-        if (!isLiveNow) return;
-        if (videoId === getFile(LAST_LIVE_FILE)) return;
+        const { videoId, method } = result;
+        console.log(`[Live] LIVE TERDETEKSI! videoId=${videoId} method=${method}`);
+
+        if (videoId === getFile(LAST_LIVE_FILE)) {
+            console.log("[Live] Sudah dikirim sebelumnya, skip");
+            return;
+        }
 
         const liveLink = `https://www.youtube.com/watch?v=${videoId}`;
         const channel = client.channels.cache.get(process.env.DISCORD_CHANNEL_ID);
