@@ -4,7 +4,7 @@ app.get("/", (req, res) => res.send("Bot Neva Aktif!"));
 app.listen(process.env.PORT || 5000);
 
 require("dotenv").config();
-const { Client, GatewayIntentBits, Partials } = require("discord.js");
+const { Client, GatewayIntentBits } = require("discord.js");
 const fs = require("fs");
 const https = require("https");
 
@@ -12,10 +12,9 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.GuildMessageReactions,
         GatewayIntentBits.MessageContent,
     ],
-    partials: [Partials.Message, Partials.Channel, Partials.Reaction],
+    partials: [],
 });
 
 const LAST_VIDEO_FILE = "./last_video_id.txt";
@@ -125,7 +124,7 @@ async function checkLive() {
         if (await alreadySentNotif(channel, liveLink)) { saveFile(LAST_LIVE_FILE, videoId); return; }
 
         await channel.send({
-            content: `Halo Neva disini\n🔴 Ayah lagi live nih, mampir yuk.\n<@&${process.env.ROLE_LIVE_ID}>!\n${liveLink}`,
+            content: `@everyone\nHalo Neva disini\n🔴 Ayah lagi live nih, mampir yuk.\n${liveLink}`,
         });
         saveFile(LAST_LIVE_FILE, videoId);
         console.log(`[Live] Notif live terkirim: ${liveLink}`);
@@ -165,7 +164,7 @@ async function checkYouTube() {
         if (await alreadySentNotif(channel, videoLink)) return;
 
         await channel.send({
-            content: `Halo Neva disini\n🎬 Ayah lagi up video yang keren, mampir yuk, jangan lupa Like nya juga yaa.\n<@&${process.env.ROLE_VIDEO_ID}>!\n${videoLink}`,
+            content: `@everyone\nHalo Neva disini\n🎬 Ayah lagi up video yang keren, mampir yuk, jangan lupa Like nya juga yaa.\n${videoLink}`,
         });
         console.log(`[YT] Notif video terkirim: ${videoLink}`);
     } catch (e) {
@@ -184,7 +183,7 @@ client.on("messageCreate", async (message) => {
         const channel = client.channels.cache.get(process.env.DISCORD_CHANNEL_ID);
         if (channel) {
             await channel.send({
-                content: `Halo Neva disini\n🎬 Ayah lagi up video yang keren, mampir yuk, jangan lupa Like nya juga yaa.\n<@&${process.env.ROLE_VIDEO_ID}>!\nhttps://www.youtube.com/watch?v=dQw4w9WgXcQ`,
+                content: `@everyone\nHalo Neva disini\n🎬 Ayah lagi up video yang keren, mampir yuk, jangan lupa Like nya juga yaa.\nhttps://www.youtube.com/watch?v=dQw4w9WgXcQ`,
             });
             message.reply("✅ Test notifikasi video berhasil dikirim!");
         } else {
@@ -196,7 +195,7 @@ client.on("messageCreate", async (message) => {
         const channel = client.channels.cache.get(process.env.DISCORD_CHANNEL_ID);
         if (channel) {
             await channel.send({
-                content: `Halo Neva disini\n🔴 Ayah lagi live nih, mampir yuk.\n<@&${process.env.ROLE_LIVE_ID}>!\nhttps://www.youtube.com/watch?v=dQw4w9WgXcQ`,
+                content: `@everyone\nHalo Neva disini\n🔴 Ayah lagi live nih, mampir yuk.\nhttps://www.youtube.com/watch?v=dQw4w9WgXcQ`,
             });
             message.reply("✅ Test notifikasi live berhasil dikirim!");
         } else {
@@ -212,25 +211,6 @@ client.on("messageCreate", async (message) => {
             await message.delete().catch(() => {});
         } catch (e) { console.error("Hapus Error:", e.message); }
     }
-});
-
-// --- REAKSI EMOT UNTUK ROLE ---
-client.on("messageReactionAdd", async (reaction, user) => {
-    if (user.bot) return;
-    if (reaction.message.id !== process.env.MESSAGE_ID) return;
-    if (reaction.partial) await reaction.fetch();
-    const member = reaction.message.guild.members.cache.get(user.id);
-    if (reaction.emoji.name === "🎬") await member.roles.add(process.env.ROLE_VIDEO_ID);
-    if (reaction.emoji.name === "🔴") await member.roles.add(process.env.ROLE_LIVE_ID);
-});
-
-client.on("messageReactionRemove", async (reaction, user) => {
-    if (user.bot) return;
-    if (reaction.message.id !== process.env.MESSAGE_ID) return;
-    if (reaction.partial) await reaction.fetch();
-    const member = reaction.message.guild.members.cache.get(user.id);
-    if (reaction.emoji.name === "🎬") await member.roles.remove(process.env.ROLE_VIDEO_ID);
-    if (reaction.emoji.name === "🔴") await member.roles.remove(process.env.ROLE_LIVE_ID);
 });
 
 client.login(process.env.BOT_TOKEN);
